@@ -1422,6 +1422,8 @@ def sample_records() -> dict:
 DEFAULT_MODEL = "gemini-3.5-flash-lite"       # 기본 모델(빠르다). secrets 의 GEMINI_MODEL 로 바꿀 수 있다
 FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-4-hydrogen"]   # 기본 모델이 바쁘거나 한도에 걸리면 차례로 써 본다
 AI_TIMEOUT = 75              # 한 번 호출을 기다리는 최대 초
+MAX_BUSY_RETRIES = 2         # 모든 모델이 바쁘다고(수요 과다) 답했을 때 자동으로 다시 시도하는 횟수
+BUSY_WAIT = 8                # 다시 시도하기 전에 기다리는 초(시도마다 8초, 16초로 늘어난다)
 MAX_OUTPUT_TOKENS = 4000
 MAX_ROUNDS = 6            # 한 메시지에서 도구 호출이 이어질 수 있는 최대 횟수
 HISTORY_BUDGET = 16000    # 다시 보내는 지난 대화의 글자 수 상한
@@ -2267,7 +2269,7 @@ def run_turn(
               "max_completion_tokens": MAX_OUTPUT_TOKENS, "reasoning_effort": "low"}
 
     wrote_text = False
-    rate_retries = bad_tool_retries = rounds = letter_fixes = verify_fixes = 0
+    rate_retries = bad_tool_retries = rounds = letter_fixes = verify_fixes = busy_retries = 0
     pending_letter = None      # 이번 턴에 저장됐지만 아직 화면에 보여 주지 않은 자소서 id
     materials_read = False     # 이번 턴에 자소서 재료(활동 내용)를 실제로 읽었는가
     nudged = False             # 답글에 자소서를 직접 쓴 것을 한 번 되돌렸는가
@@ -2361,13 +2363,20 @@ def run_turn(
             if e.kind == "not_found":
                 yield ("error", "설정한 AI 모델을 쓸 수 없어요. 관리자 설정의 GEMINI_MODEL 값을 확인해 주세요.")
                 return
-            if e.kind == "connection":
-                yield ("error", "AI 서버에서 답이 오지 않았어요. 잠시 뒤에 다시 보내 주세요.")
-                return
             if e.kind == "blocked":
                 yield ("error", "AI 가 이 내용에는 답하지 못했어요. 표현을 바꿔 다시 보내 주세요.")
                 return
-            yield ("error", "AI 서버가 지금 바빠요. 잠시 뒤에 다시 보내 주세요.")
+            # 무료 등급은 수요가 몰리면 거절(503)되거나 답이 늦는다. 바로 포기하지 않고 조금 기다렸다가 다시 보낸다.
+            if busy_retries < MAX_BUSY_RETRIES:
+                busy_retries += 1
+                wait = BUSY_WAIT * busy_retries
+                yield ("status", f"AI 서버가 붐벼서 {wait}초 뒤에 다시 시도하는 중… ({busy_retries}/{MAX_BUSY_RETRIES})")
+                sleep(wait)
+                continue
+            if e.kind == "connection":
+                yield ("error", "AI 서버에서 답이 오지 않았어요. 잠시 뒤에 다시 보내 주세요.")
+                return
+            yield ("error", "AI 서버가 지금 바빠요(무료 등급 수요 과다). 잠시 뒤에 다시 보내 주세요.")
             return
         rounds += 1
 
