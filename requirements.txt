@@ -1,0 +1,12 @@
+# 포트폴리오 싱크(app.py)가 쓰는 파이썬 패키지.
+# 설치:  pip install -r requirements.txt
+# Streamlit Community Cloud 는 이 파일을 읽어 자동으로 설치한다(app.py 와 같은 폴더에 둔다).
+
+streamlit==1.67.0   # 웹 화면. 밝게/어둡게 전환이 내부 동작에 기대므로 버전을 고정한다
+groq>=1.7           # 대화 AI(Groq 무료 모델) 호출
+requests            # 채용 공고 링크 읽기(Tavily)
+pandas              # 활동 기록실의 표
+pypdf               # 올린 PDF 에서 글 추출
+python-pptx         # 올린 PPT 에서 글 추출, 활동 기록을 PPT 로 내려받기
+python-docx         # 올린 워드 파일에서 글 추출, 기록·자소서를 워드로 내려받기
+fpdf2               # 기록·자소서를 PDF 로 내려받기
