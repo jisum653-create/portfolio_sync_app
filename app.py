@@ -2662,6 +2662,19 @@ button[data-testid^="stBaseButton-primary"] {{
 }}
 button[data-testid^="stBaseButton-primary"] * {{ color: #FFFFFF !important; }}
 
+/* 밝기 고르기: 붙어 있는 버튼 두 개. 지금 고른 쪽만 옅은 파란색으로 칠한다 */
+.st-key-theme_switch {{ gap: 0 !important; width: fit-content; flex-wrap: nowrap !important; }}
+.st-key-theme_light button {{ border-radius: 0.7rem 0 0 0.7rem !important; }}
+.st-key-theme_dark button {{ border-radius: 0 0.7rem 0.7rem 0 !important; margin-left: -1px; }}
+.st-key-theme_switch, .st-key-theme_switch > div {{ flex: 0 0 auto !important; width: auto !important; min-width: max-content; }}
+.st-key-theme_switch button {{ white-space: nowrap; min-width: max-content; }}
+.st-key-theme_switch button p {{ white-space: nowrap; overflow: visible; text-overflow: clip; }}
+.st-key-theme_switch button[data-testid^="stBaseButton-primary"] {{
+    background: {pal['glow']} !important; border-color: {pal['main']['primary_color']} !important;
+    color: {pal['main']['primary_color']} !important;
+}}
+.st-key-theme_switch button[data-testid^="stBaseButton-primary"] * {{ color: {pal['main']['primary_color']} !important; }}
+
 /* 버튼: 올리면 떠오르고, 누르면 눌린다 */
 .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {{
     transition: transform .12s ease, box-shadow .15s ease;
@@ -3058,18 +3071,16 @@ def top_bar() -> None:
     ss = st.session_state
     with st.container(key="topbar", horizontal=True, vertical_alignment="center", gap="small"):
         if THEME_READY:
+            # 밝기는 '누르는 순간만 작동하는' 버튼 두 개로 고른다. 선택값을 기억하는 위젯(선택 칸)을 쓰면,
+            # 화면이 다시 그려지는 사이에 예전 선택값이 다시 전달되어 색이 늦게 바뀌거나 섞이는 일이 있었다.
             now = theme_current()
-            pick = st.segmented_control(
-                "화면 밝기", list(THEME_MODES), default=now, label_visibility="collapsed",
-                format_func=lambda m: ":material/light_mode: 밝게" if m == "light" else ":material/dark_mode: 어둡게",
-                key=f"theme_pick_{now}_{ss.get('theme_nonce', 0)}",
-            )
-            if pick is None and ss.get("theme_nonce", 0) < 30:
-                ss.theme_nonce = ss.get("theme_nonce", 0) + 1      # 고른 칸을 다시 눌러 선택이 풀린 경우 — 원래대로 돌린다
-                st.rerun()
-            if pick in THEME_MODES and pick != now:
-                theme_choose(pick)
-                st.rerun()
+            with st.container(key="theme_switch", horizontal=True, gap=None):
+                for mode, label, icon in (("light", "밝게", ":material/light_mode:"),
+                                          ("dark", "어둡게", ":material/dark_mode:")):
+                    if st.button(label, icon=icon, key=f"theme_{mode}",
+                                 type="primary" if mode == now else "secondary") and mode != now:
+                        theme_choose(mode)
+                        st.rerun()      # 새 색은 화면을 처음부터 다시 그릴 때 적용된다
         if ss.get("authed") and ss.get("started"):
             if st.button("초기화", icon=":material/restart_alt:", key="top_reset",
                          help="대화만 지우거나, 기록까지 모두 지우고 처음부터 시작합니다."):
