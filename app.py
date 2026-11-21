@@ -1586,7 +1586,11 @@ def _parse_candidates(text: str) -> list[dict]:
         out.append({"no": len(out) + 1, "company": cells[0] if cells else "",
                     "title": cells[1] if len(cells) > 1 else "",
                     "deadline": cells[2] if len(cells) > 2 else "확인 필요", "url": url})
-    return out[:6]
+    out.sort(key=lambda c: "(목록)" in c["title"] or "목록" in c["company"])      # 개별 공고를 앞에, 공고 목록 페이지는 뒤에
+    out = out[:6]
+    for i, c in enumerate(out):
+        c["no"] = i + 1
+    return out
 
 
 def _search_google(client, q: str) -> tuple[list[dict], list[dict]]:
@@ -2269,7 +2273,7 @@ def run_turn(
               "max_completion_tokens": MAX_OUTPUT_TOKENS, "reasoning_effort": "low"}
 
     wrote_text = False
-    rate_retries = bad_tool_retries = rounds = letter_fixes = verify_fixes = busy_retries = 0
+    rate_retries = bad_tool_retries = rounds = letter_fixes = verify_fixes = busy_retries = empty_retries = 0
     pending_letter = None      # 이번 턴에 저장됐지만 아직 화면에 보여 주지 않은 자소서 id
     materials_read = False     # 이번 턴에 자소서 재료(활동 내용)를 실제로 읽었는가
     nudged = False             # 답글에 자소서를 직접 쓴 것을 한 번 되돌렸는가
@@ -2383,6 +2387,10 @@ def run_turn(
         choice = resp.choices[0]
         text = masker.unmask((choice.message.content or "").strip())
         calls = choice.message.tool_calls or []
+        if not calls and not text and choice.finish_reason != "length" and empty_retries < 2:
+            empty_retries += 1      # 빈 답이 왔다(무료 등급 모델이 가끔 그런다) — 같은 요청을 다시 보낸다
+            rounds -= 1
+            continue
         params["tool_choice"] = "auto"
         if not calls and not pending_letter and not nudged and looks_like_letter(text, user_text):
             # 자소서를 답글에 직접 썼다. 글자수·근거 검증을 거치지 않은 글이므로 보여 주지 않고 도구로 다시 내게 한다.
@@ -2400,6 +2408,9 @@ def run_turn(
         if not calls:
             if choice.finish_reason == "length":
                 yield ("text", "\n\n_(답변이 길어 여기서 끊겼어요. \"이어서\"라고 보내 주세요.)_")
+            elif not text and not wrote_text:
+                yield ("error", "AI 가 답을 만들지 못했어요. 같은 내용을 한 번 더 보내 주세요.")
+                return
             history.append({"role": "assistant", "content": text or "(응답 없음)"})
             return
 
