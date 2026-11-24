@@ -2951,12 +2951,20 @@ export default function(component) {
 FILE_LINK_JS = FILES_JS + """
 export default function(component) {
     const { data, parentElement } = component;
-    parentElement.innerHTML = "";
+    // 전에 그린 버튼만 지운다(안을 통째로 비우면 Streamlit 이 넣어 둔 스타일까지 사라진다).
+    parentElement.querySelectorAll(".ps-file, .ps-msg").forEach((e) => e.remove());
     const btn = document.createElement("button");
     btn.className = "ps-file";
     btn.textContent = data.label;
+    // 꾸밈은 버튼에 직접 적는다: 스타일이 어디에 들어가든 같은 모양으로 보인다.
+    btn.style.cssText = "font: inherit; font-size: 0.9rem; line-height: 1.35; text-align: left; padding: 0.42rem 0.85rem; " +
+        "cursor: pointer; border-radius: 0.6rem; border: 1px solid var(--st-border-color, #CFE0F8); " +
+        "background: transparent; color: var(--st-primary-color, #2C8DF4); font-weight: 600;";
+    btn.onmouseenter = () => { btn.style.borderColor = "var(--st-primary-color, #2C8DF4)"; };
+    btn.onmouseleave = () => { btn.style.borderColor = "var(--st-border-color, #CFE0F8)"; };
     const msg = document.createElement("span");
     msg.className = "ps-msg";
+    msg.style.cssText = "font-size: 0.8rem; margin-left: 0.5rem; color: #C0392B;";
     btn.onclick = async () => {
         msg.textContent = "";
         try {
