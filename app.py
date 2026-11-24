@@ -2826,7 +2826,6 @@ def secret(key: str, default=None):
     return os.environ.get(key, default)
 
 
-@st.cache_resource
 def get_client(api_key: str | None, model: str | None = None):
     """Gemini 를 부르는 객체. 키가 없거나 SDK 를 쓸 수 없으면 None.
 
@@ -2990,23 +2989,24 @@ export default function(component) {
     parentElement.appendChild(msg);
 }
 """
-FILE_LINK_CSS = """
-.ps-file { font: inherit; font-size: 0.9rem; line-height: 1.35; text-align: left; padding: 0.4rem 0.8rem; cursor: pointer;
-    border-radius: 0.6rem; border: 1px solid var(--st-border-color, #CFE0F8);
-    background: var(--st-background-color, #FFFFFF); color: var(--st-text-color, #15233B); }
-.ps-file:hover { border-color: var(--st-primary-color, #2C8DF4); color: var(--st-primary-color, #2C8DF4); }
-.ps-msg { font-size: 0.8rem; margin-left: 0.5rem; color: #C0392B; }
-"""
 
 
 @st.cache_resource
+def _component(name: str, js: str):
+    """브라우저 쪽 코드를 등록한다. 이름에 코드의 지문을 붙여, 코드가 바뀌면 예전 등록분이 다시 쓰이지 않게 한다.
+
+    (배포 서버는 코드를 올려도 재시작하지 않을 수 있다. 그때 캐시에 남은 예전 코드가 새 요청을 알아듣지 못하면
+    자료 보관 같은 새 기능이 조용히 실패한다.)
+    """
+    return st.components.v2.component(f"{name}_{hashlib.sha256(js.encode('utf-8')).hexdigest()[:8]}", js=js)
+
+
 def _storage_bridge():
-    return st.components.v2.component("portfolio_sync_storage", js=STORAGE_JS)
+    return _component("portfolio_sync_storage", STORAGE_JS)
 
 
-@st.cache_resource
 def _file_link():
-    return st.components.v2.component("portfolio_sync_file", js=FILE_LINK_JS, css=FILE_LINK_CSS)
+    return _component("portfolio_sync_file", FILE_LINK_JS)
 
 
 # ---------- 활동 자료 파일 보관 ----------
