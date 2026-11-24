@@ -1602,7 +1602,7 @@ def _search_google(client, q: str) -> tuple[list[dict], list[dict]]:
             messages=[{"role": "system", "content": SEARCH_SYSTEM},
                       {"role": "user", "content": f"찾을 조건: {q}\n오늘 날짜: {_today()}"}],
             builtin=["google_search"], max_completion_tokens=3000, reasoning_effort="low")
-    except AIError:
+    except Exception:
         try:
             client.no_google_search = True
         except Exception:
@@ -1635,7 +1635,7 @@ def _search_web(client, q: str) -> list[dict]:
                           {"role": "user", "content": f"조건: {q}\n오늘 날짜: {_today()}\n검색 결과 페이지:\n"
                                                       + "\n".join(pages)}],
                 builtin=["url_context"], max_completion_tokens=3000, reasoning_effort="low")
-        except AIError:
+        except Exception:
             return []
         found = [c for c in _parse_candidates(resp.choices[0].message.content) if c["url"]]
         if found:
@@ -1708,7 +1708,7 @@ def read_job_posting(url, client=None, tavily_key: str | None = None) -> dict:
             text = (resp.choices[0].message.content or "").strip()
             if "READ_FAILED" in text[:80] or len(text) < 120:
                 text = ""
-        except AIError:
+        except Exception:
             text = ""
     if not text and tavily_key:
         text = _tavily_read(url, tavily_key)
@@ -1950,12 +1950,11 @@ def verify_letter(client, state: dict, letter: dict, model: str, sleep=time.slee
             found = [masker.unmask(str(x)).strip() for x in found]
             # 초안에 실제로 있는 표현만 남긴다(검증 쪽이 지어낸 지적은 버린다)
             return [x for x in found if x and "".join(x.split()) in flat][:5]
-        except AIError as e:
-            if attempt == 0 and e.kind == "rate" and e.wait is not None and e.wait <= MAX_RATE_WAIT:
+        except Exception as exc:      # AI 호출 실패든 답을 읽지 못했든, 검증은 '하지 못함'으로 끝낸다
+            e = _ai_error(exc) if _is_ai_error(exc) else None
+            if e and attempt == 0 and e.kind == "rate" and e.wait is not None and e.wait <= MAX_RATE_WAIT:
                 sleep(e.wait + 1)
                 continue
-            return None
-        except (ValueError, AttributeError, IndexError, TypeError):
             return None
     return None
 
@@ -2085,10 +2084,18 @@ class AIError(Exception):
         self.kind, self.detail, self.wait = kind, detail, wait
 
 
+def _is_ai_error(e: Exception) -> bool:
+    """AI 호출 실패인가. Streamlit 은 화면을 다시 그릴 때마다 이 파일을 처음부터 다시 실행하므로,
+    같은 이름의 AIError 클래스가 실행마다 새로 만들어진다. 그래서 isinstance 가 아니라 이름과 모양으로 판단한다."""
+    return type(e).__name__ == "AIError" and hasattr(e, "kind")
+
+
 def _ai_error(e: Exception) -> AIError:
     """SDK 가 던진 오류를 엔진이 다루는 종류로 바꾼다."""
     if isinstance(e, AIError):
         return e
+    if _is_ai_error(e):      # 이전 화면 실행에서 정의된 AIError — 지금의 AIError 로 옮겨 담는다
+        return AIError(getattr(e, "kind", "server"), getattr(e, "detail", ""), getattr(e, "wait", None))
     code, name, text = getattr(e, "status_code", None), type(e).__name__, str(e)
     low = text.lower()
     wait = None
@@ -2120,11 +2127,30 @@ class GeminiChat:
     - 이번 턴에 모델이 낸 단계(생각·도구 호출)는 받은 그대로 다시 보낸다. 지난 턴은 주고받은 글만 보낸다.
     """
 
-    def __init__(self, api_key: str, models: list[str]):
+    def __init__(self, api_key: str, models: list[str], flags: dict | None = None):
         self._sdk = genai.Client(api_key=api_key, http_options={"retry_options": {"attempts": 1}})
         self.models = list(dict.fromkeys(m for m in models if m))
-        self.plain_history = False       # 지난 대화를 단계가 아니라 글 한 덩어리로 보낼 것인가(단계 형식이 거절될 때)
+        # 화면을 다시 그려도 이어져야 하는 값. 이 객체는 대화할 때마다 새로 만들고, 값만 세션에 둔 사전에 남긴다.
+        self.flags = flags if flags is not None else {}
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+    @property
+    def plain_history(self) -> bool:
+        """지난 대화를 단계가 아니라 글 한 덩어리로 보낼 것인가(단계 형식이 거절될 때)."""
+        return bool(self.flags.get("plain_history"))
+
+    @plain_history.setter
+    def plain_history(self, value: bool) -> None:
+        self.flags["plain_history"] = bool(value)
+
+    @property
+    def no_google_search(self) -> bool:
+        """Gemini 의 Google 검색 도구가 이 키에서 막혀 있는가(무료 등급)."""
+        return bool(self.flags.get("no_google_search"))
+
+    @no_google_search.setter
+    def no_google_search(self, value: bool) -> None:
+        self.flags["no_google_search"] = bool(value)
 
     # --- 보내는 쪽 ---
     @staticmethod
@@ -2337,7 +2363,10 @@ def run_turn(
         try:
             resp = client.chat.completions.create(
                 messages=build_messages(state, history, masker, memo) + extra, **params)
-        except AIError as e:
+        except Exception as exc:
+            if not _is_ai_error(exc):
+                raise
+            e = _ai_error(exc)
             if e.kind == "auth":
                 yield ("error", "AI 키가 올바르지 않아요. 관리자 설정(Secrets)의 GEMINI_API_KEY 를 확인해 주세요.")
                 return
@@ -2778,18 +2807,18 @@ def secret(key: str, default=None):
 
 @st.cache_resource
 def get_client(api_key: str | None, model: str | None = None):
-    """Gemini 를 부르는 객체. 키가 없거나 SDK 를 쓸 수 없으면 None."""
+    """Gemini 를 부르는 객체. 키가 없거나 SDK 를 쓸 수 없으면 None.
+
+    대화할 때마다 새로 만든다. 이전 화면 실행에서 만든 객체를 세션에 넣어 두고 다시 쓰면, 그 객체가 던지는
+    오류(AIError)가 '이전 실행의 클래스'라서 지금 코드의 except 가 알아보지 못한다.
+    """
     if not api_key:
         return None
-    ss = st.session_state
-    key = (api_key, model)
-    if ss.get("ai_client_key") != key:      # 접속마다 한 번만 만든다
-        try:
-            ss["ai_client"] = GeminiChat(api_key, [model or DEFAULT_MODEL] + FALLBACK_MODELS)
-        except Exception:
-            ss["ai_client"] = None
-        ss["ai_client_key"] = key
-    return ss["ai_client"]
+    flags = st.session_state.setdefault("ai_flags", {})
+    try:
+        return GeminiChat(api_key, [model or DEFAULT_MODEL] + FALLBACK_MODELS, flags)
+    except Exception:
+        return None
 
 
 # 첫 화면에는 새싹 그림을 이미지 주소(data URI)로 넣는다. st.html 은 보안상 svg 태그를 그대로 두지 않는다.
