@@ -63,6 +63,7 @@ class _Later:
 
 
 pd = _Later("pandas")          # 활동 기록실의 표를 그릴 때만 쓴다
+alt = _Later("altair")         # 활동 추이 그래프를 그릴 때만 쓴다(Streamlit 과 함께 설치된다)
 genai = _Later("google.genai")  # 대화를 보낼 때만 쓴다(Gemini SDK)
 requests = _Later("requests")  # 공고 링크를 읽을 때만 쓴다
 
@@ -701,8 +702,22 @@ def set_privacy_terms(state: dict, terms: list[str]) -> None:
     state["privacy"] = {"terms": clean[:50]}
 
 
-def import_json(raw: str) -> tuple[dict | None, list[str]]:
-    """백업 파일을 검증해 새 상태를 만든다. 형식이 맞지 않는 항목은 건너뛰고 사유를 남긴다."""
+def _file_infos(items) -> list[dict]:
+    """활동에 붙은 자료 파일 정보(이름·크기 등)만 검증해 돌려준다. 파일 자체는 브라우저에 있다."""
+    out = []
+    for f in items if isinstance(items, list) else []:
+        if isinstance(f, dict) and isinstance(f.get("id"), str) and isinstance(f.get("name"), str):
+            out.append({"id": f["id"][:40], "name": f["name"][:200], "size": int(f.get("size") or 0),
+                        "mime": str(f.get("mime") or ""), "saved_at": str(f.get("saved_at") or "")})
+    return out[:50]
+
+
+def import_json(raw: str, keep_files: bool = False) -> tuple[dict | None, list[str]]:
+    """백업 파일을 검증해 새 상태를 만든다. 형식이 맞지 않는 항목은 건너뛰고 사유를 남긴다.
+
+    keep_files: 같은 브라우저에 저장된 기록을 다시 읽을 때만 True — 그 브라우저에 보관된 자료 파일의 정보를 살린다.
+    백업 파일을 불러올 때는 파일이 따라오지 않으므로 정보도 버린다.
+    """
     try:
         data = json.loads(raw)
     except (ValueError, TypeError):
@@ -732,6 +747,8 @@ def import_json(raw: str) -> tuple[dict | None, list[str]]:
             id_map[item.get("id")] = res["activity"]["id"]
             if isinstance(item.get("created_at"), str) and _PERIOD_RE.match(item["created_at"]):
                 res["activity"]["created_at"] = item["created_at"]
+            if keep_files and _file_infos(item.get("files")):
+                res["activity"]["files"] = _file_infos(item.get("files"))
         else:
             notes.append(f"활동 {i}번: " + "; ".join(res["errors"]))
 
@@ -1281,6 +1298,7 @@ GUIDE = {
 3. 오른쪽 활동 카드에서 스위치로 **포함/미포함**을 정하고, **빈 칸 N개 직접 채우기**로 빠진 칸을 적습니다.
 4. "자소서 써줘"라고 하면 되묻지 않고 바로 씁니다. "○○회사 지원동기 500자로"처럼 회사·문항·글자수를 함께 말하면 그에 맞춥니다.
 
+- 파일을 올리면 대화창 위에 **자료로 보관할까요?**가 뜹니다. 동의하면 그 활동의 자료 파일로 보관되어 활동 기록실에서 내려받을 수 있습니다.
 - 무엇부터 할지 모르겠으면 빠른 시작 버튼 4개 중 하나를 누릅니다.
 - 자소서 초안은 대화창과 오른쪽 **자소서** 탭, 자소서 보관함에 블록으로 생깁니다. 블록 오른쪽 끝에서 바로 내려받거나 휴지통으로 지웁니다.
 - "데이터 분석 직무 공고 찾아서 자소서 써줘"처럼 회사나 업무 분야를 말하면 관련 공고를 웹 검색으로 찾아 후보를 보여 줍니다. 쓸 공고를 고르면(동의) 그 공고를 자세히 읽고 요건에 맞춰 씁니다.
@@ -1288,11 +1306,13 @@ GUIDE = {
 - "전공을 경영학과로 바꿔줘"처럼 말하면 기본 정보도 대화로 고칩니다.
 - 사이트 사용법도 대화창에 물어볼 수 있습니다.""",
     "활동 기록실": """\
-1. 위쪽 보기 5개(학년 교과목 보드, 동아리 활동 보드, 교외/비교과/봉사 보드, 전체 목록, 갤러리)로 활동을 살펴봅니다.
+1. 위쪽 보기 6개(학년 교과목 보드, 동아리 활동 보드, 교외/비교과/봉사 보드, 전체 목록, 갤러리, 활동 추이)로 활동을 살펴봅니다.
 2. 자소서에 쓸 활동만 **포함**으로 둡니다. 카드 오른쪽 위의 스위치를 켜면 포함, 끄면 미포함입니다(**전체 목록** 표에서도 바꿀 수 있습니다).
 3. 카드의 **빈 칸 N개**나 **상세 편집**, 아래 **활동 상세**에서 내용을 직접 고치고 저장합니다.
 4. **기록 내려받기**에서 워드·PDF·파워포인트·표(CSV)·텍스트로 받습니다.
 
+- **활동 추이**에서는 시기별 활동 수와 완성도, 분류·역량별 분포를 그래프로 보고 '나의 활동 변화'를 읽습니다.
+- **활동 상세**의 **자료 파일** 칸에 근거 자료를 보관해 두고 언제든 내려받습니다(동의한 파일만, 이 브라우저에만 보관).
 - **진단**을 펼치면 활동별로 비어 있는 칸(○)을 한눈에 봅니다.
 - **새 활동 직접 추가**로 대화 없이 활동을 만들 수 있습니다.""",
     "내 정보·진로": """\
@@ -1314,7 +1334,7 @@ GUIDE = {
 - 초안입니다. 사실 확인과 최종 검토는 직접 해야 합니다.""",
     "저장·초기화": """\
 - **자동 저장**: 기록이 바뀔 때마다 이 브라우저에 저장됩니다. 대화 내용은 저장되지 않습니다.
-- **백업**: 왼쪽 메뉴 **백업 · 불러오기**에서 파일로 받아 두면 다른 기기에서 이어 쓸 수 있습니다.
+- **백업**: 왼쪽 메뉴 **백업 · 불러오기**에서 파일로 받아 두면 다른 기기에서 이어 쓸 수 있습니다. 보관한 자료 파일은 백업에 들어가지 않습니다.
 - **초기화**: 화면 오른쪽 위에 있습니다. '대화만 지우기' 또는 '기록과 대화 모두 지우기'를 고릅니다.
 - **나가기**: 왼쪽 메뉴 아래에 있습니다. 공용 PC라면 '여럿이 함께 쓰는 기기'를 골라 기록을 지우고 나갑니다.
 - **밝게 / 어둡게**: 화면 오른쪽 위에서 고릅니다.""",
@@ -1323,10 +1343,11 @@ GUIDE = {
 - 글을 뽑을 수 없는 스캔본·이미지는 원본 그대로 AI가 읽습니다(파일당 8MB, 한 번에 3개까지). 이때는 **파일 안의 개인정보를 가릴 수 없으니** 민감한 내용이 있는 파일은 올리지 않습니다.
 - 무료 등급에서는 AI에게 보낸 내용이 Google의 서비스 개선에 쓰일 수 있습니다. 그래서 글은 이름·학교·연락처를 가린 뒤 보냅니다.
 - 여러 사람이 동시에 쓰면 답변이 늦어지거나 하루 사용량이 끝날 수 있습니다. 안내된 시간 뒤에 다시 보냅니다.
+- 답을 기다리는 동안 다른 메뉴나 버튼을 누르거나 연결이 잠깐 끊기면 답이 끊깁니다. 이때는 "답이 끊겼어요" 안내와 함께 '같은 메시지 다시 보내기' 버튼이 나오니 눌러서 다시 받습니다(끊기기 전에 저장된 기록은 그대로 남습니다).
 - 자소서는 초안입니다. 숫자와 경험을 기록과 대조하지만 완벽하지 않으니 제출 전에 직접 확인합니다.
 - 공고 검색 결과는 웹 검색에 따라 달라지고, 마감됐거나 다른 공고일 수 있습니다. 고르기 전에 링크를 열어 확인합니다. 로그인이 필요한 공고는 읽지 못하니 본문을 붙여넣습니다.
 - HWP 파일은 읽지 못합니다. HWPX나 PDF로 저장해 올립니다.
-- 기록은 한 브라우저에만 있습니다. 브라우저 데이터를 지우면 함께 사라지니 백업을 받아 둡니다.
+- 기록과 보관한 자료 파일은 한 브라우저에만 있습니다. 브라우저 데이터를 지우면 함께 사라지니 백업을 받아 둡니다. 자료 파일은 파일당 5MB, 전체 30MB까지 보관합니다.
 - 목록에 없는 다른 사람의 이름은 자동으로 가려지지 않습니다. '내 정보·진로'의 가릴 단어에 적습니다.
 - 오래된 대화는 AI가 기억하지 못합니다(기록실에 저장된 내용은 남습니다).""",
 }
@@ -2872,7 +2893,29 @@ def touch() -> None:
 # 기록은 서버가 아니라 사용자의 브라우저(localStorage)에 둔다. 같은 브라우저로 다시 오면 이어지고,
 # 다른 사람의 브라우저에서는 보이지 않는다. 함께 쓰는 PC 에서는 '나가기'에서 지우고 나간다.
 # 브라우저와 주고받는 통로. 이 자바스크립트가 방문자의 브라우저에서 실행되어 저장소를 읽고 쓴 뒤 답을 돌려준다.
-STORAGE_JS = """
+# 올린 자료 파일은 용량이 커서 localStorage(약 5MB)에 넣을 수 없다. 브라우저의 IndexedDB 에 따로 보관한다.
+FILES_JS = """
+const FILES_DB = "portfolio_sync_files";
+function filesDb() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(FILES_DB, 1);
+        req.onupgradeneeded = () => req.result.createObjectStore("files", { keyPath: "id" });
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+async function filesRun(mode, work) {
+    const db = await filesDb();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction("files", mode);
+        const out = work(tx.objectStore("files"));
+        tx.oncomplete = () => resolve(out);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+    });
+}
+"""
+STORAGE_JS = FILES_JS + """
 export default function(component) {
     const { data, setStateValue } = component;
     if (!data || !data.op) return;
@@ -2880,10 +2923,23 @@ export default function(component) {
     const done = (window.__portfolioSyncDone = window.__portfolioSyncDone || {});
     if (done[data.token]) return;
     done[data.token] = true;
+    if (data.op === "file_put" || data.op === "file_delete") {
+        // 자료 파일 보관·삭제. 끝나면 끝났다고 답해서, 서버가 같은 파일을 되풀이해 보내지 않게 한다.
+        const work = data.op === "file_put"
+            ? (store) => (data.files || []).forEach((f) => store.put(f))
+            : (store) => (data.ids || []).forEach((id) => store.delete(id));
+        filesRun("readwrite", work)
+            .then(() => setStateValue("reply", JSON.stringify({ token: data.token, ok: true })))
+            .catch((e) => setStateValue("reply", JSON.stringify({ token: data.token, ok: false, error: String(e) })));
+        return;
+    }
     let value = null, error = null;
     try {
         if (data.op === "save") localStorage.setItem(data.name, data.value);
-        else if (data.op === "remove") localStorage.removeItem(data.name);
+        else if (data.op === "remove") {
+            localStorage.removeItem(data.name);
+            filesRun("readwrite", (store) => store.clear()).catch(() => {});      // 기록을 지우면 보관한 파일도 지운다
+        }
         else if (data.op === "read") value = localStorage.getItem(data.name);
     } catch (e) { error = String(e); }
     if (data.op === "read") {
@@ -2891,11 +2947,160 @@ export default function(component) {
     }
 }
 """
+# 보관한 파일을 내려받는 버튼. 누르면 브라우저가 IndexedDB 에서 파일을 꺼내 바로 저장한다(서버를 거치지 않는다).
+FILE_LINK_JS = FILES_JS + """
+export default function(component) {
+    const { data, parentElement } = component;
+    parentElement.innerHTML = "";
+    const btn = document.createElement("button");
+    btn.className = "ps-file";
+    btn.textContent = data.label;
+    const msg = document.createElement("span");
+    msg.className = "ps-msg";
+    btn.onclick = async () => {
+        msg.textContent = "";
+        try {
+            const rec = await new Promise((resolve, reject) => {
+                filesDb().then((db) => {
+                    const q = db.transaction("files").objectStore("files").get(data.id);
+                    q.onsuccess = () => resolve(q.result);
+                    q.onerror = () => reject(q.error);
+                }, reject);
+            });
+            if (!rec) { msg.textContent = "이 브라우저에 보관된 파일이 없어요."; return; }
+            const bin = atob(rec.b64);
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            const url = URL.createObjectURL(new Blob([bytes], { type: rec.mime || "application/octet-stream" }));
+            const a = document.createElement("a");
+            a.href = url; a.download = rec.name;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+        } catch (e) { msg.textContent = "파일을 꺼내지 못했어요."; }
+    };
+    parentElement.appendChild(btn);
+    parentElement.appendChild(msg);
+}
+"""
+FILE_LINK_CSS = """
+.ps-file { font: inherit; font-size: 0.9rem; line-height: 1.35; text-align: left; padding: 0.4rem 0.8rem; cursor: pointer;
+    border-radius: 0.6rem; border: 1px solid var(--st-border-color, #CFE0F8);
+    background: var(--st-background-color, #FFFFFF); color: var(--st-text-color, #15233B); }
+.ps-file:hover { border-color: var(--st-primary-color, #2C8DF4); color: var(--st-primary-color, #2C8DF4); }
+.ps-msg { font-size: 0.8rem; margin-left: 0.5rem; color: #C0392B; }
+"""
 
 
 @st.cache_resource
 def _storage_bridge():
     return st.components.v2.component("portfolio_sync_storage", js=STORAGE_JS)
+
+
+@st.cache_resource
+def _file_link():
+    return st.components.v2.component("portfolio_sync_file", js=FILE_LINK_JS, css=FILE_LINK_CSS)
+
+
+# ---------- 활동 자료 파일 보관 ----------
+# 사용자가 동의하면, 올린 파일을 그 활동의 '자료'로 브라우저(IndexedDB)에 보관한다. 서버에는 남기지 않는다.
+# 기록(JSON)에는 파일의 이름·크기 같은 정보만 넣고, 파일 내용은 브라우저에만 있다.
+MAX_KEEP_BYTES = 5 * 1024 * 1024       # 보관하는 파일 하나의 크기 상한
+MAX_KEEP_TOTAL = 30 * 1024 * 1024      # 한 기록실에 보관하는 파일 전체 크기 상한
+MAX_FILE_TRIES = 8                     # 브라우저가 답하지 않을 때 같은 요청을 다시 보내는 횟수
+
+
+def size_text(n: int) -> str:
+    return f"{n / 1024 / 1024:.1f}MB" if n >= 1024 * 1024 else f"{max(1, round(n / 1024))}KB"
+
+
+def kept_bytes(db: dict) -> int:
+    return sum(f.get("size", 0) for a in db["activities"] for f in a.get("files") or [])
+
+
+def keep_files(db: dict, act: dict, items: list[dict]) -> tuple[int, list[str]]:
+    """파일들을 이 활동의 자료로 보관한다. items: [{"name", "mime", "b64", "size"}]. (보관한 수, 보관하지 못한 사유)"""
+    ss = st.session_state
+    kept, skipped, total = 0, [], kept_bytes(db)
+    for it in items:
+        if it["size"] > MAX_KEEP_BYTES:
+            skipped.append(f"{it['name']}: {size_text(MAX_KEEP_BYTES)}를 넘어 보관하지 않았어요")
+            continue
+        if total + it["size"] > MAX_KEEP_TOTAL:
+            skipped.append(f"{it['name']}: 보관 한도({size_text(MAX_KEEP_TOTAL)})가 차서 보관하지 않았어요")
+            continue
+        fid = uuid.uuid4().hex[:10]
+        act.setdefault("files", []).append({"id": fid, "name": it["name"], "size": it["size"],
+                                            "mime": it["mime"], "saved_at": _today()})
+        ss.setdefault("file_ops", []).append({
+            "token": uuid.uuid4().hex[:10], "op": "file_put", "tries": 0, "ids": [fid],
+            "files": [{"id": fid, "name": it["name"], "mime": it["mime"], "b64": it["b64"]}]})
+        total += it["size"]
+        kept += 1
+    return kept, skipped
+
+
+def upload_item(up) -> dict:
+    """올린 파일을 보관용 모양으로 바꾼다."""
+    data = up.getvalue()
+    return {"name": up.name, "mime": getattr(up, "type", "") or "application/octet-stream",
+            "b64": base64.b64encode(data).decode("ascii"), "size": len(data)}
+
+
+def sync_files() -> None:
+    """보관·삭제 요청을 브라우저에 하나씩 전한다. 화면을 다 그린 뒤 마지막에 부른다.
+
+    브라우저가 끝냈다고 답하면 다음 요청으로 넘어간다. 활동이나 자료가 지워졌으면 브라우저의 파일도 지운다.
+    """
+    ss = st.session_state
+    if not ss.get("started"):
+        return
+    now_ids = {f["id"] for a in ss.db["activities"] for f in a.get("files") or []}
+    gone = ss.get("known_files", now_ids) - now_ids
+    if gone:
+        ss.setdefault("file_ops", []).append({"token": uuid.uuid4().hex[:10], "op": "file_delete", "tries": 0,
+                                              "ids": sorted(gone)})
+    ss.known_files = now_ids
+    ops = ss.get("file_ops") or []
+    if not ops:
+        return
+    op = ops[0]
+    result = _storage_bridge()(
+        data={"op": op["op"], "token": op["token"], "files": op.get("files"), "ids": op.get("ids")},
+        key="ls_files", on_reply_change=lambda: None)
+    try:
+        got = json.loads(getattr(result, "reply", None) or "{}")
+    except (TypeError, ValueError):
+        got = {}
+    done = got.get("token") == op["token"]
+    failed = (done and not got.get("ok")) or (not done and op["tries"] >= MAX_FILE_TRIES)
+    if not done and not failed:
+        op["tries"] += 1
+        return
+    ops.pop(0)
+    if failed and op["op"] == "file_put":      # 브라우저에 넣지 못한 파일은 목록에서도 뺀다
+        for a in ss.db["activities"]:
+            a["files"] = [f for f in a.get("files") or [] if f["id"] not in op["ids"]]
+        ss.known_files = {f["id"] for a in ss.db["activities"] for f in a.get("files") or []}
+        ss.toasts = ["파일을 이 브라우저에 보관하지 못했어요(브라우저 저장 공간을 확인해 주세요)"]
+        touch()
+    if ops or failed:
+        st.rerun()
+
+
+def file_shelf(act: dict, where: str) -> None:
+    """활동에 보관한 자료 파일 목록(내려받기·삭제)."""
+    files = act.get("files") or []
+    if not files:
+        st.caption("보관한 자료가 아직 없어요.")
+    for f in files:
+        left, right = st.columns([6, 1], vertical_alignment="center")
+        with left:
+            _file_link()(data={"id": f["id"], "label": f"{f['name']} · {size_text(f['size'])} · 내려받기"},
+                         key=f"fl_{where}_{f['id']}")
+        if right.button("", icon=":material/delete:", key=f"fdel_{where}_{f['id']}", help="이 자료 삭제"):
+            act["files"] = [x for x in files if x["id"] != f["id"]]
+            touch()
+            st.rerun()
 
 
 def browser_storage(op: str, key: str, value: str | None = None, token: str | None = None) -> str | None:
@@ -2945,7 +3150,7 @@ def load_browser_record() -> None:
     try:
         value = json.loads(raw).get("value")
         if value:
-            db, _ = import_json(value)
+            db, _ = import_json(value, keep_files=True)      # 이 브라우저의 기록이므로 자료 파일 정보도 살린다
             if db is not None:
                 saved = {"db": db, "saved_at": json.loads(value).get("saved_at", "")}
     except (ValueError, AttributeError):
@@ -2978,6 +3183,8 @@ def open_room(db: dict) -> None:
     ss.db, ss.started, ss.wipe_token = db, True, None
     ss.chat, ss.api_messages, ss.pending = [], [], None
     ss.saved_hash = None      # 다음 화면에서 브라우저에 저장된다
+    ss.known_files = {f["id"] for a in db["activities"] for f in a.get("files") or []}
+    ss.file_ops, ss.pending_keep = [], None
     touch()
     st.rerun()
 
@@ -3548,6 +3755,9 @@ def handle_turn(text: str, uploads: list, slots: list) -> None:
     ss = st.session_state
     content, file_notes, blocked, raw_files = build_user_content(text, uploads)
     user_msg = {"role": "user", "content": text, "notes": file_notes}
+    # 답을 받는 동안 다른 곳을 누르거나 연결이 잠깐 끊기면 Streamlit 이 이 실행을 멈춘다.
+    # 그때 질문만 남고 답이 없는 상태가 되지 않도록, 턴이 열려 있음을 적어 둔다(close_broken_turn 이 정리).
+    ss.turn_open = {"api": len(ss.api_messages), "text": "" if uploads else text, "hash": state_hash(ss.db)}
     ss.chat.append(user_msg)
     render_message(user_msg)
 
@@ -3557,6 +3767,7 @@ def handle_turn(text: str, uploads: list, slots: list) -> None:
     if blocked:
         msg = {"role": "assistant", "content": "", "error": blocked}
         ss.chat.append(msg)
+        ss.turn_open = None
         render_message(msg)
         return
 
@@ -3604,7 +3815,11 @@ def handle_turn(text: str, uploads: list, slots: list) -> None:
             m["content"] = (m.get("content") or "") + "\n(첨부 원본은 이미 읽고 처리했다)"
     ss.chat.append({"role": "assistant", "content": answer, "notes": notes, "error": error,
                     "letters": sorted(changed_since(marks, ss.db)["letters"])})     # 이 답변에서 쓴 자소서
+    ss.turn_open = None
     ss.recent = changed_since(marks, ss.db)
+    if uploads and not error and ss.db["activities"]:
+        # 올린 파일을 활동의 자료로 보관할지 묻는다(다음 화면의 keep_prompt). 동의하기 전에는 보관하지 않는다.
+        ss.pending_keep = {"items": [upload_item(up) for up in uploads], "acts": sorted(ss.recent["acts"])}
     toasts = []
     if ss.recent["acts"]:
         toasts.append(f"활동 {len(ss.recent['acts'])}건을 기록실에 반영했어요")
@@ -3618,6 +3833,57 @@ def handle_turn(text: str, uploads: list, slots: list) -> None:
     st.rerun()
 
 
+BROKEN_TURN = ("답변을 받는 도중에 화면이 다시 그려져 답이 끊겼어요(답을 기다리는 동안 다른 곳을 누르거나 "
+               "연결이 잠깐 끊기면 생겨요). 같은 메시지를 다시 보내 주세요.")
+
+
+def close_broken_turn() -> None:
+    """지난 실행에서 끝나지 못한 턴을 정리한다: AI 와의 대화에서 빼고, 화면에는 끊겼다고 알린다."""
+    ss = st.session_state
+    left = ss.get("turn_open")
+    if not left:
+        return
+    ss.turn_open = None
+    del ss.api_messages[left["api"]:]
+    for m in ss.api_messages:
+        m.pop("_steps", None)
+        m.pop("files", None)
+    if ss.chat and ss.chat[-1]["role"] == "user":
+        ss.chat.append({"role": "assistant", "content": "", "error": BROKEN_TURN, "retry": left.get("text") or ""})
+    if state_hash(ss.db) != left.get("hash"):      # 끊기기 전에 저장된 기록은 그대로 남긴다
+        touch()
+
+
+def keep_prompt() -> None:
+    """방금 올린 파일을 활동의 자료로 보관할지 묻는다. 동의해야만 보관한다."""
+    ss = st.session_state
+    pend = ss.get("pending_keep")
+    acts = ss.db["activities"]
+    if not pend or not acts:
+        ss.pending_keep = None
+        return
+    ids = [a["id"] for a in reversed(acts)]
+    start = next((i for i, x in enumerate(ids) if x in pend["acts"]), 0)
+    names = ", ".join(it["name"] for it in pend["items"])
+    with st.container(border=True, key="keep_prompt"):
+        st.markdown(":material/folder_open: **방금 올린 파일을 활동의 자료로 보관할까요?**")
+        st.caption(f"{names} — 보관하면 활동 기록실의 '자료 파일'에서 언제든 내려받을 수 있어요. 파일은 서버가 아니라 "
+                   f"이 브라우저에만 보관됩니다(파일당 {size_text(MAX_KEEP_BYTES)}, 전체 {size_text(MAX_KEEP_TOTAL)}까지).")
+        name_of = {a["id"]: a["name"] for a in acts}
+        pick = st.selectbox("보관할 활동", ids, index=start, key=f"keep_act_{ss.rev}",
+                            format_func=lambda i: name_of.get(i, i))
+        yes, no = st.columns(2)
+        if yes.button("동의하고 보관하기", type="primary", key="keep_yes", width="stretch", icon=":material/check:"):
+            kept, skipped = keep_files(ss.db, find_activity(ss.db, pick), pend["items"])
+            ss.pending_keep = None
+            ss.toasts = ([f"자료 {kept}개를 보관했어요"] if kept else []) + skipped
+            touch()
+            st.rerun()
+        if no.button("보관하지 않기", key="keep_no", width="stretch"):
+            ss.pending_keep = None
+            st.rerun()
+
+
 def page_chat() -> None:
     ss = st.session_state
     st.header("대화")
@@ -3627,11 +3893,13 @@ def page_chat() -> None:
     st.caption("무료 등급 AI(Gemini)를 쓰고 있어 답변이 잠시 지연되거나 하루 사용량이 소진될 수 있어요. "
                f"파일의 글은 한 번에 {MAX_UPLOAD_CHARS:,}자까지 읽고, 스캔본·이미지는 AI가 직접 읽습니다.")
 
+    close_broken_turn()
     left, right = st.columns([11, 9], gap="medium")
     slots = records_panel(right)
     fill_panel(slots, ss.db, ss.get("recent", NO_CHANGE))
 
     with left:
+        keep_prompt()
         box = st.container(height=CHAT_HEIGHT, border=True, autoscroll=True)
         value = st.chat_input(
             "메시지를 입력하거나 파일(문서·이미지)을 올려 주세요",
@@ -3658,6 +3926,10 @@ def page_chat() -> None:
                         st.rerun()
         for idx, msg in enumerate(ss.chat):
             render_message(msg, idx)
+        if ss.chat and ss.chat[-1].get("retry") and not (text or uploads):
+            if st.button("같은 메시지 다시 보내기", key=f"retry_{len(ss.chat)}", icon=":material/refresh:"):
+                ss.pending = ss.chat[-1]["retry"]
+                st.rerun()
 
         if text or uploads:
             handle_turn(text or "", uploads, slots)
@@ -3665,7 +3937,10 @@ def page_chat() -> None:
 
 # ---------- 활동 기록실 ----------
 # 노션 활동 DB 의 보기 5개를 그대로 옮겼다(그룹 기준·필터·카드에 보이는 속성까지).
-VIEWS = ["학년 교과목 보드", "동아리 활동 보드", "교외/비교과/봉사 보드", "전체 목록", "갤러리(요약)"]
+VIEWS = ["학년 교과목 보드", "동아리 활동 보드", "교외/비교과/봉사 보드", "전체 목록", "갤러리(요약)", "활동 추이"]
+TREND_SCOPES = ["전체", "교과목", "동아리", "교외·비교과·봉사"]
+# 그래프 색: 사이트의 파란색을 기준으로, 분류를 구별할 때만 다른 색을 쓴다
+CHART_COLORS = ["#2C8DF4", "#7A6BF5", "#35B8A6", "#F2A33A", "#E0668B", "#5B6C8F", "#9CCB5A", "#B98AE6", "#8A97AD"]
 OUTSIDE_CATEGORIES = [c for c in CATEGORIES if c not in ("교과목", "동아리")]
 
 
@@ -3832,6 +4107,20 @@ def detail_editor(db: dict, acts: list[dict]) -> None:
         for err in res["errors"]:
             st.error(err)
 
+    with st.container(border=True, key=f"files_{act['id']}"):
+        st.markdown(":material/folder_open: **자료 파일**")
+        st.caption("이 활동의 근거 자료(보고서, 발표 자료, 확인서 등)를 함께 보관해 두고 언제든 내려받습니다. "
+                   f"파일은 서버가 아니라 이 브라우저에만 보관됩니다(파일당 {size_text(MAX_KEEP_BYTES)}, "
+                   f"전체 {size_text(MAX_KEEP_TOTAL)} 중 {size_text(kept_bytes(db))} 사용). 백업 파일에는 들어가지 않습니다.")
+        file_shelf(act, "detail")
+        ups = st.file_uploader("자료 추가", accept_multiple_files=True, key=f"keep_up_{act['id']}_{ss.rev}")
+        agree = st.checkbox("올린 파일을 이 브라우저에 보관하는 데 동의합니다", key=f"keep_ok_{act['id']}_{ss.rev}")
+        if st.button("자료 보관하기", key=f"keep_add_{act['id']}", icon=":material/save:", disabled=not (ups and agree)):
+            kept, skipped = keep_files(db, act, [upload_item(up) for up in ups])
+            ss.toasts = ([f"자료 {kept}개를 보관했어요"] if kept else []) + skipped
+            touch()
+            st.rerun()
+
     st.caption(f"작성일 {act['created_at']} · 마지막 수정 {act['updated_at']}")
     download_box("이 활동만 내려받기", "activities", [act], f"활동_{safe_name(act['name'])}", key=f"act_{act['id']}")
     with st.popover("이 활동 삭제", icon=":material/delete:"):
@@ -3840,6 +4129,115 @@ def detail_editor(db: dict, acts: list[dict]) -> None:
             delete_activity(db, act["id"])
             touch()
             st.rerun()
+
+
+def term_label(act: dict) -> str:
+    return " ".join(x for x in (act["grade"], act["semester"]) if x) or "시기 미입력"
+
+
+def trend_facts(acts: list[dict], diags: dict) -> list[str]:
+    """그래프 옆에 적는 '나의 활동 변화' 몇 줄. 기록에 있는 값으로만 센다."""
+    order = [f"{g} {sm}" for g in GRADES for sm in SEMESTERS]
+    timed = [a for a in acts if a["grade"] and a["semester"]]
+    facts = []
+    if timed:
+        counts = {}
+        for a in timed:
+            counts[term_label(a)] = counts.get(term_label(a), 0) + 1
+        terms = sorted(counts, key=order.index)
+        top = max(terms, key=lambda t: counts[t])
+        facts.append(f"활동이 가장 많았던 시기는 **{top}**({counts[top]}건)입니다.")
+        if len(terms) >= 2:
+            last, prev = terms[-1], terms[-2]
+            diff = counts[last] - counts[prev]
+            change = "같습니다" if diff == 0 else (f"{abs(diff)}건 늘었습니다" if diff > 0 else f"{abs(diff)}건 줄었습니다")
+            facts.append(f"가장 최근 시기 **{last}**의 활동은 {counts[last]}건으로, 그 전 시기({prev})보다 {change}.")
+    tags = {}
+    for a in acts:
+        for t in a["tags"]:
+            tags[t] = tags.get(t, 0) + 1
+    if tags:
+        best = sorted(tags, key=lambda t: -tags[t])[:3]
+        facts.append("가장 많이 쌓인 역량은 " + ", ".join(f"**{t}**({tags[t]}건)" for t in best) + "입니다.")
+    low = [a["name"] for a in acts if diags[a["id"]]["percent"] < 60]
+    if low:
+        facts.append(f"완성도가 60% 아래인 활동이 {len(low)}건 있습니다: " + ", ".join(low[:3]) + (" 등" if len(low) > 3 else "") + ".")
+    untimed = len(acts) - len(timed)
+    if untimed:
+        facts.append(f"학년·학기가 비어 있는 활동이 {untimed}건 있어 시기별 그래프에서는 '시기 미입력'으로 묶였습니다.")
+    return facts
+
+
+def trend_view(acts: list[dict], diags: dict) -> None:
+    """활동 추이: 보드(교과목·동아리·교외)별로 시기에 따른 활동 수와 완성도, 분류와 역량의 분포를 본다."""
+    scope = st.segmented_control("범위", TREND_SCOPES, default=TREND_SCOPES[0], key="trend_scope",
+                                 label_visibility="collapsed") or TREND_SCOPES[0]
+    if scope == "교과목":
+        acts = [a for a in acts if a["category"] == "교과목"]
+    elif scope == "동아리":
+        acts = [a for a in acts if a["category"] == "동아리"]
+    elif scope == "교외·비교과·봉사":
+        acts = [a for a in acts if a["category"] not in ("교과목", "동아리")]
+    st.caption(f"{scope} 활동 {len(acts)}건을 기준으로 그렸어요. 기록에 적힌 학년·학기, 분류, 역량 태그, 완성도만 씁니다.")
+    if not acts:
+        st.info("이 범위에 해당하는 활동이 아직 없어요.")
+        return
+
+    order = [f"{g} {sm}" for g in GRADES for sm in SEMESTERS] + ["시기 미입력"]
+    rows = pd.DataFrame([{"시기": term_label(a), "분류": a["category"] or "분류 없음",
+                          "완성도": diags[a["id"]]["percent"], "활동": a["name"]} for a in acts])
+    terms = [t for t in order if t in set(rows["시기"])]
+    cats = [c for c in CATEGORIES + ["분류 없음"] if c in set(rows["분류"])]
+
+    with st.container(border=True, key="trend_facts"):
+        st.markdown(":material/insights: **나의 활동 변화**")
+        for line in trend_facts(acts, diags) or ["아직 변화를 말할 만큼 기록이 쌓이지 않았어요."]:
+            st.markdown("- " + line)
+
+    left, right = st.columns(2)
+    with left:
+        st.markdown("**시기별 활동 수**")
+        st.altair_chart(
+            alt.Chart(rows).mark_bar(cornerRadiusTopLeft=3, cornerRadiusTopRight=3).encode(
+                x=alt.X("시기:N", sort=terms, title=None, axis=alt.Axis(labelAngle=0, labelLimit=90)),
+                y=alt.Y("count():Q", title="활동 수", axis=alt.Axis(tickMinStep=1)),
+                color=alt.Color("분류:N", sort=cats, scale=alt.Scale(domain=cats, range=CHART_COLORS[:len(cats)]),
+                                legend=alt.Legend(orient="bottom", title=None)),
+                tooltip=["시기", "분류", alt.Tooltip("count():Q", title="활동 수")],
+            ).properties(height=280), width="stretch")
+    with right:
+        st.markdown("**시기별 평균 완성도**")
+        mean = rows.groupby("시기", as_index=False)["완성도"].mean().round(0)
+        base = alt.Chart(mean).encode(
+            x=alt.X("시기:N", sort=terms, title=None, axis=alt.Axis(labelAngle=0, labelLimit=90)),
+            y=alt.Y("완성도:Q", title="평균 완성도(%)", scale=alt.Scale(domain=[0, 100])),
+            tooltip=["시기", alt.Tooltip("완성도:Q", title="평균 완성도(%)")])
+        st.altair_chart((base.mark_line(color=CHART_COLORS[0], strokeWidth=2.5)
+                         + base.mark_point(color=CHART_COLORS[0], filled=True, size=90)).properties(height=280),
+                        width="stretch")
+
+    left, right = st.columns(2)
+    with left:
+        st.markdown("**분류별 활동 수**")
+        by_cat = rows.groupby("분류", as_index=False).size().rename(columns={"size": "활동 수"})
+        st.altair_chart(
+            alt.Chart(by_cat).mark_bar(color=CHART_COLORS[0], cornerRadiusTopRight=3, cornerRadiusBottomRight=3).encode(
+                y=alt.Y("분류:N", sort="-x", title=None, axis=alt.Axis(labelLimit=140)),
+                x=alt.X("활동 수:Q", axis=alt.Axis(tickMinStep=1)), tooltip=["분류", "활동 수"],
+            ).properties(height=max(120, 34 * len(by_cat))), width="stretch")
+    with right:
+        st.markdown("**역량 태그별 활동 수**")
+        tag_rows = pd.DataFrame([{"역량": t} for a in acts for t in a["tags"]])
+        if tag_rows.empty:
+            st.caption("역량 태그가 달린 활동이 아직 없어요.")
+        else:
+            by_tag = tag_rows.groupby("역량", as_index=False).size().rename(columns={"size": "활동 수"})
+            by_tag = by_tag.sort_values("활동 수", ascending=False).head(10)
+            st.altair_chart(
+                alt.Chart(by_tag).mark_bar(color=CHART_COLORS[1], cornerRadiusTopRight=3, cornerRadiusBottomRight=3).encode(
+                    y=alt.Y("역량:N", sort="-x", title=None, axis=alt.Axis(labelLimit=140)),
+                    x=alt.X("활동 수:Q", axis=alt.Axis(tickMinStep=1)), tooltip=["역량", "활동 수"],
+                ).properties(height=max(120, 34 * len(by_tag))), width="stretch")
 
 
 def page_activities() -> None:
@@ -3902,6 +4300,9 @@ def page_activities() -> None:
         grades_used = [g for g in GRADES if any(a["grade"] == g for a in acts)]
         pick = st.multiselect("학년으로 걸러 보기", grades_used, placeholder="전체 학년")
         table_view(db, [a for a in acts if not pick or a["grade"] in pick], diags)
+
+    elif view == VIEWS[5]:    # 활동 추이 — 시기·분류·역량별로 쌓인 모습을 그래프로 본다
+        trend_view(acts, diags)
 
     else:                     # 갤러리(요약) — 3열 카드
         for start in range(0, len(acts), 3):
@@ -4051,3 +4452,4 @@ elif page == PAGES[2]:
 else:
     page_letters()
 autosave()
+sync_files()
